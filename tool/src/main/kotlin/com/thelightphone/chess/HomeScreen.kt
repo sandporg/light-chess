@@ -37,13 +37,13 @@ import kotlinx.coroutines.launch
 class HomeViewModel(
     private val store: GameStore,
 ) : LightViewModel<Unit>() {
-    private val _saved = MutableStateFlow<SavedGame?>(null)
-    val saved: StateFlow<SavedGame?> = _saved.asStateFlow()
+    private val _games = MutableStateFlow<List<SavedGame>>(emptyList())
+    val games: StateFlow<List<SavedGame>> = _games.asStateFlow()
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch {
-            _saved.value = store.load()?.takeIf { it.isInProgress }
+            _games.value = store.loadAll()
         }
     }
 }
@@ -60,7 +60,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
-        val saved by viewModel.saved.collectAsState()
+        val games by viewModel.games.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -73,7 +73,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                if (saved == null) {
+                if (games.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -94,21 +94,30 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                             .fillMaxWidth()
                             .padding(start = 1f.gridUnitsAsDp()),
                     ) {
-                        LightText(
-                            text = "Continue",
-                            variant = LightTextVariant.Copy,
-                            modifier = Modifier
-                                .lightClickable {
-                                    navigateTo(screenFactory = { GameScreen(it, GameLaunch.Continue) })
-                                }
-                                .padding(top = 0.75f.gridUnitsAsDp()),
-                        )
-                        LightText(
-                            text = saved!!.summary(),
-                            variant = LightTextVariant.Detail,
-                            lighten = true,
-                            modifier = Modifier.padding(bottom = 0.75f.gridUnitsAsDp()),
-                        )
+                        games.forEach { game ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .lightClickable {
+                                        navigateTo(
+                                            screenFactory = {
+                                                GameScreen(it, GameLaunch.Continue(game.id))
+                                            },
+                                        )
+                                    }
+                                    .padding(vertical = 0.75f.gridUnitsAsDp()),
+                            ) {
+                                LightText(
+                                    text = game.summary(),
+                                    variant = LightTextVariant.Copy,
+                                )
+                                LightText(
+                                    text = game.statusLine(),
+                                    variant = LightTextVariant.Detail,
+                                    lighten = true,
+                                )
+                            }
+                        }
                     }
                 }
 

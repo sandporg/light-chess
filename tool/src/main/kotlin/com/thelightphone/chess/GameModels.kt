@@ -14,7 +14,7 @@ sealed class GameLaunch {
         val bot: BotLevel,
     ) : GameLaunch()
 
-    data object Continue : GameLaunch()
+    data class Continue(val gameId: String) : GameLaunch()
 }
 
 @Serializable
@@ -30,6 +30,8 @@ data class SavedGame(
     val savedAtElapsedMs: Long,
     val botLevel: String,
     val result: String? = null,
+    val id: String = "",
+    val updatedAtEpochMs: Long = 0L,
 ) {
     fun bot(): BotLevel = BotLevel.valueOf(botLevel)
 
@@ -41,6 +43,13 @@ data class SavedGame(
         val color = if (playerIsWhite) "White" else "Black"
         val timer = GameTimer.entries.firstOrNull { it.durationMs == timerMs }?.label ?: "No timer"
         return "$color · $timer · ${bot().label}"
+    }
+
+    fun statusLine(): String {
+        val move = movesUci.size / 2 + 1
+        val whiteToMove = movesUci.size % 2 == 0
+        val yourTurn = whiteToMove == playerIsWhite
+        return if (yourTurn) "Move $move · your turn" else "Move $move"
     }
 
     companion object {

@@ -16,7 +16,7 @@ This repository is a Light SDK tool. The game lives in [`tool/`](./tool); packag
 
 ## What you can do
 
-**Home.** If nothing is in progress, the home screen is just a prompt and **NEW GAME**. If a game is still going, **Continue** shows a one-line summary (your color, timer, bot) so you can pick it back up.
+**Home.** If nothing is in progress, the home screen is just a prompt and **NEW GAME**. Active games are listed with color, timer, bot, and move number; tap one to continue. You can have more than one game going at a time.
 
 **New game.** Before the first move you choose:
 
@@ -24,7 +24,7 @@ This repository is a Light SDK tool. The game lives in [`tool/`](./tool); packag
 | ---------- | -------------------------------- | -------- |
 | Timer      | No timer, 5 min, 10 min, 30 min  | No timer |
 | Your color | White, Black, Random             | White    |
-| Bot        | Easy, Medium, Hard, Grand master | Medium   |
+| Difficulty | Easy, Novice, Medium, Intermediate, Hard, Expert, Grand master | Medium   |
 
 **The board.** Tap a piece, then a highlighted square. Empty targets get a dot; captures get a ring. The last move is outlined. Rank and file labels sit on the near edges, and the board flips if you are playing Black.
 
@@ -32,7 +32,7 @@ On a timed game the top bar is `Medium - 9:42` (bot name plus _your_ remaining c
 
 **During a game** the bottom bar is:
 
-- **Star** - hint. The engine looks at the position at Hard strength and outlines a suggested from/to. Tap the destination to play it.
+- **Star** - hint. The engine looks at the position at Grand master strength and outlines a suggested from/to. Tap the destination to play it.
 - **Trash** - resign, with a confirm screen.
 - **Rewind** - undo your last move (and the bot’s reply). Disabled until you have moved.
 
@@ -42,16 +42,23 @@ Leaving the board, pausing the app, or killing the process saves an in-progress 
 
 ## Bot
 
-Search is iterative deepening with alpha-beta and Michniewski’s Simplified Evaluation Function ([Chess Programming Wiki](https://www.chessprogramming.org/Simplified_Evaluation_Function)). Easy and Medium also blunder on purpose so they are not just a shallow search.
+Each level is a different way of thinking, not the same search with a longer clock. Target ratings: Easy ~250, Novice ~500, Medium ~750, Intermediate ~1100, Hard ~1300, Expert ~1900, Grand master ~2500.
 
-| Level        | Search           | Notes                                                                             |
-| ------------ | ---------------- | --------------------------------------------------------------------------------- |
-| Easy         | Depth 1, ~350 ms | Often picks a random legal move; otherwise can swap the best move for a worse one |
-| Medium       | Depth 1, ~400 ms | Same idea, a bit more reliable                                                    |
-| Hard         | Depth 4, ~2 s    | Full search, no forced blunders                                                   |
-| Grand master | Depth 6, ~4.5 s  | Same eval, longer think                                                           |
+| Level        | How it thinks                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| Easy         | About 40% completely random. Otherwise a noisy material-only 1-ply look — no piece-square tables.      |
+| Novice       | About 20% random. Still material-only 1-ply, but calmer than Easy.                                     |
+| Medium       | 1-ply with placement eval. Greedy captures, hangs pieces, does not see recaptures.                     |
+| Intermediate | Depth 1 plus quiescence. Takes hanging pieces, does not hang its own to a one-move recapture.          |
+| Hard         | 2-ply alpha-beta, no quiescence. Sees one-move tactics, misses longer combinations.                    |
+| Expert       | Iterative deepening (up to 5 ply) with quiescence. No opening book; occasional slight inaccuracy. Ponders on your time. |
+| Grand master | Opening book, iterative deepening (up to 12 ply), transposition table, null move, check extensions, quiescence, and the full eval. No randomness. Ponders on your time. |
 
-On a clock the search budget shrinks with remaining time. Hints always search at Hard, independent of the bot you are playing.
+On a clock the bot uses about 1/40 of its remaining time per move (never more than two-thirds of what’s left), and Expert / Grand master stop once the best move is stable. Untimed Grand master is capped at 3.5 s. Expert and Grand master also think on your time: they prefetch a hint, then ponder the reply, so a matching move can be answered immediately.
+
+Hints always search at Grand master strength.
+
+Eval for Intermediate, Hard, Expert, and Grand master is Michniewski’s Simplified Evaluation Function ([Chess Programming Wiki](https://www.chessprogramming.org/Simplified_Evaluation_Function)), plus pawn structure, mobility, and king safety on the stronger levels.
 
 ## Engine and pieces
 

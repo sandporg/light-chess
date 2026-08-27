@@ -16,6 +16,7 @@ import com.thelightphone.chess.engine.StartColor
 import com.thelightphone.chess.engine.WHITE
 import com.thelightphone.chess.engine.colorOf
 import com.thelightphone.chess.engine.moveFrom
+import com.thelightphone.chess.engine.movePromo
 import com.thelightphone.chess.engine.moveTo
 import com.thelightphone.chess.engine.parseSquare
 import com.thelightphone.chess.engine.sq64
@@ -39,6 +40,10 @@ class GameViewModel(
     private val launch: GameLaunch,
 ) : LightViewModel<Unit>() {
 
+    private var gameId: String = when (launch) {
+        is GameLaunch.Continue -> launch.gameId
+        is GameLaunch.New -> GameStore.newId()
+    }
     private val board = Board.start()
     private val rng = Random.Default
     private val cancelSearch = AtomicBoolean(false)
@@ -57,6 +62,13 @@ class GameViewModel(
     private var lastTickElapsed: Long = 0
     private var clockJob: Job? = null
     private var hintJob: Job? = null
+    private var ponderJob: Job? = null
+    private var hinting: Boolean = false
+    private var readyHint: Int = 0
+    private var hintPly: Int = -1
+    private var readyPonder: Int = 0
+    private var ponderForHint: Int = 0
+    private var ponderPly: Int = -1
     private var started: Boolean = false
     private var searchGen: Int = 0
 
@@ -72,24 +84,33 @@ class GameViewModel(
             lastTickElapsed = SystemClock.elapsedRealtime()
             startClock()
             publish()
+            prefetchHint()
         }
     }
 
     override fun onScreenHide(screen: SimpleLightScreen<Unit>) {
         super.onScreenHide(screen)
         clockJob?.cancel()
+        hintJob?.cancel()
+        ponderJob?.cancel()
+        hinting = false
         viewModelScope.launch { persist() }
     }
 
     override fun onAppPause() {
         super.onAppPause()
         clockJob?.cancel()
+        hintJob?.cancel()
+        ponderJob?.cancel()
+        hinting = false
         viewModelScope.launch { persist() }
     }
 
     override fun onCleared() {
         cancelSearch.set(true)
         hintJob?.cancel()
+        ponderJob?.cancel()
+        hinting = false
         clockJob?.cancel()
         super.onCleared()
     }
@@ -155,30 +176,122 @@ class GameViewModel(
         val state = _ui.value
         if (!state.inProgress || state.thinking || state.overlay !is GameOverlay.None) return
         if (board.whiteToMove != playerIsWhite) return
-        hintJob?.cancel()
-        hintJob = viewModelScope.launch {
-            val snapshot = board.copy()
-            val move = withContext(Dispatchers.Default) {
-                Search.pickMove(
-                    board = snapshot,
-                    level = BotLevel.HARD,
-                    remainingMs = null,
-                    rng = rng,
-                    cancelled = { !isActive },
-                )
-            }
-            if (move == 0 || result != null || board.whiteToMove != playerIsWhite) return@launch
-            hintFrom = moveFrom(move)
-            hintTo = moveTo(move)
-            _ui.update {
-                it.copy(
-                    selected = null,
-                    targets = emptySet(),
-                    hintFrom = hintFrom,
-                    hintTo = hintTo,
-                )
+        if (revealReadyHint()) return
+        if (hintJob?.isActive != true) prefetchHint()
+        hinting = true
+        publish()
+        val pending = hintJob
+        viewModelScope.launch {
+            try {
+                pending?.join()
+                revealReadyHint()
+            } finally {
+                hinting = false
+                publish()
             }
         }
+    }
+
+    private fun prefetchHint() {
+        if (result != null || board.whiteToMove != playerIsWhite) return
+        if (readyHint != 0 && hintPly == movesUci.size) {
+            startPonderIfReady()
+            return
+        }
+        hintJob?.cancel()
+        ponderJob?.cancel()
+        readyHint = 0
+        hintPly = -1
+        readyPonder = 0
+        ponderForHint = 0
+        ponderPly = -1
+        val ply = movesUci.size
+        val snapshot = board.copy()
+        hintJob = viewModelScope.launch {
+            val move = withLowPriority {
+                Search.pickHint(snapshot, cancelled = { !isActive })
+            }
+            if (!isActive) return@launch
+            if (ply != movesUci.size || result != null || board.whiteToMove != playerIsWhite) return@launch
+            if (move != 0) {
+                readyHint = move
+                hintPly = ply
+                startPonderIfReady()
+            }
+        }
+    }
+
+    private fun startPonderIfReady() {
+        if (!botLevel.ponders) return
+        if (result != null || board.whiteToMove != playerIsWhite) return
+        if (readyHint == 0 || hintPly != movesUci.size) return
+        if (ponderJob?.isActive == true && ponderForHint == readyHint && ponderPly == movesUci.size) return
+        ponderJob?.cancel()
+        readyPonder = 0
+        ponderForHint = readyHint
+        ponderPly = movesUci.size
+        val assumed = readyHint
+        val ply = movesUci.size
+        val snapshot = board.copy()
+        snapshot.makeMove(assumed)
+        if (snapshot.gameResult(playerIsWhite) != null) return
+        val level = botLevel
+        ponderJob = viewModelScope.launch {
+            val reply = withLowPriority {
+                Search.pickPonder(snapshot, level, cancelled = { !isActive })
+            }
+            if (!isActive) return@launch
+            if (ply != movesUci.size || assumed != readyHint) return@launch
+            if (reply != 0) {
+                readyPonder = reply
+                ponderForHint = assumed
+                ponderPly = ply
+            }
+        }
+    }
+
+    private suspend fun withLowPriority(block: suspend () -> Int): Int = withContext(Dispatchers.Default) {
+        val tid = android.os.Process.myTid()
+        val previous = android.os.Process.getThreadPriority(tid)
+        try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            block()
+        } finally {
+            android.os.Process.setThreadPriority(previous)
+        }
+    }
+
+    private fun revealReadyHint(): Boolean {
+        if (readyHint == 0 || hintPly != movesUci.size) return false
+        hintFrom = moveFrom(readyHint)
+        hintTo = moveTo(readyHint)
+        publish()
+        return true
+    }
+
+    private fun discardIdleWork() {
+        hintJob?.cancel()
+        ponderJob?.cancel()
+        hinting = false
+        readyHint = 0
+        hintPly = -1
+        readyPonder = 0
+        ponderForHint = 0
+        ponderPly = -1
+        hintFrom = null
+        hintTo = null
+    }
+
+    private fun sameMove(a: Int, b: Int): Boolean =
+        moveFrom(a) == moveFrom(b) && moveTo(a) == moveTo(b) && movePromo(a) == movePromo(b)
+
+    private fun isLegal(encoded: Int): Boolean {
+        val moves = IntArray(256)
+        val n = board.generateLegalMoves(moves)
+        for (i in 0 until n) {
+            if (sameMove(moves[i], encoded)) return true
+        }
+        return false
     }
 
     fun undoUserMove() {
@@ -191,7 +304,7 @@ class GameViewModel(
         val index = lastUserMoveIndex()
         if (index < 0 || result != null) return
         cancelSearch.set(true)
-        hintJob?.cancel()
+        discardIdleWork()
         val kept = movesUci.take(index)
         board.loadFen(startFen)
         kept.forEach { board.applyUci(it) }
@@ -214,6 +327,7 @@ class GameViewModel(
         startClock()
         viewModelScope.launch { persist() }
         publish(overlay = GameOverlay.None)
+        prefetchHint()
     }
 
     private fun lastUserMoveIndex(): Int {
@@ -236,7 +350,7 @@ class GameViewModel(
     fun confirmResign() {
         result = GameResult.LOSS
         viewModelScope.launch {
-            store.clear()
+            store.remove(gameId)
             publish(overlay = GameOverlay.GameOver("Resigned"))
         }
     }
@@ -255,7 +369,7 @@ class GameViewModel(
     private suspend fun startGame() {
         when (launch) {
             is GameLaunch.Continue -> {
-                val saved = store.load()
+                val saved = store.load(launch.gameId)
                 if (saved == null || !saved.isInProgress) {
                     result = GameResult.DRAW
                     publish(overlay = GameOverlay.GameOver("No saved game"))
@@ -284,9 +398,11 @@ class GameViewModel(
         startClock()
         publish()
         maybeComputerMove()
+        prefetchHint()
     }
 
     private fun restore(saved: SavedGame) {
+        gameId = saved.id.ifBlank { gameId }
         board.loadFen(saved.startFen)
         saved.movesUci.forEach { board.applyUci(it) }
         playerIsWhite = saved.playerIsWhite
@@ -317,11 +433,18 @@ class GameViewModel(
     }
 
     private fun playUserMove(move: ChessMove) {
-        hintJob?.cancel()
-        hintFrom = null
-        hintTo = null
+        val ponderHit = readyPonder != 0 &&
+            sameMove(ponderForHint, move.encoded) &&
+            ponderPly == movesUci.size
+        val reply = if (ponderHit) readyPonder else 0
+        discardIdleWork()
         applyMove(move.encoded)
-        maybeComputerMove()
+        if (result != null) return
+        if (reply != 0 && isLegal(reply)) {
+            applyMove(reply)
+        } else {
+            maybeComputerMove()
+        }
     }
 
     private fun applyMove(encoded: Int) {
@@ -336,12 +459,14 @@ class GameViewModel(
             publish(overlay = GameOverlay.GameOver(resultMessage(result!!)))
         } else {
             publish()
+            prefetchHint()
         }
     }
 
     private fun maybeComputerMove() {
         if (result != null) return
         if (board.whiteToMove == playerIsWhite) return
+        discardIdleWork()
         cancelSearch.set(false)
         _ui.update { it.copy(thinking = true, selected = null, targets = emptySet()) }
         val gen = ++searchGen
@@ -405,18 +530,19 @@ class GameViewModel(
         }
         clockJob?.cancel()
         viewModelScope.launch {
-            store.clear()
+            store.remove(gameId)
             publish(overlay = GameOverlay.GameOver(resultMessage(result!!)))
         }
     }
 
     private suspend fun persist() {
         if (result != null) {
-            store.clear()
+            store.remove(gameId)
             return
         }
         store.save(
             SavedGame(
+                id = gameId,
                 fen = board.toFen(),
                 startFen = startFen,
                 movesUci = movesUci.toList(),
@@ -455,7 +581,7 @@ class GameViewModel(
             whiteTimeMs = whiteTimeMs,
             blackTimeMs = blackTimeMs,
             hasTimer = timerMs != null,
-            thinking = result == null && board.whiteToMove != playerIsWhite,
+            thinking = hinting || (result == null && board.whiteToMove != playerIsWhite),
             overlay = overlay,
             inProgress = result == null,
             botLabel = botLevel.label,

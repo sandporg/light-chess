@@ -85,7 +85,7 @@ class BoardTest {
         val board = Board.start()
         val legal = board.legalMoves().map { it.encoded }.toSet()
         for (level in BotLevel.entries) {
-            val move = Search.pickMove(board, level, remainingMs = null, rng = kotlin.random.Random(1))
+            val move = Search.pickMove(board, level, remainingMs = 800, rng = kotlin.random.Random(1))
             assertTrue(move in legal, "level $level played illegal $move")
             assertFalse(board.isCheckmate())
         }

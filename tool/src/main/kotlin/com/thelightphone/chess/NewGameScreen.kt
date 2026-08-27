@@ -77,7 +77,7 @@ class NewGameScreen(sealedActivity: SealedLightActivity) :
                         )
                     }
 
-                    SectionLabel("Bot")
+                    SectionLabel("Difficulty")
                     BotLevel.entries.forEach { option ->
                         SelectableRow(
                             label = option.label,

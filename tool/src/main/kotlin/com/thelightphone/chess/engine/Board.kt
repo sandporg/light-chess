@@ -168,6 +168,30 @@ class Board {
         return count >= 3
     }
 
+    fun hash(): Long = hashHistory[ply]
+
+    fun makeNullMove() {
+        val undo = undos[ply]
+        undo.captured = EMPTY
+        undo.ep = epSquare
+        undo.castle = castle
+        undo.halfmove = halfmove
+        epSquare = -1
+        halfmove++
+        side = opposite(side)
+        ply++
+        hashHistory[ply] = computeHash()
+    }
+
+    fun unmakeNullMove() {
+        ply--
+        val undo = undos[ply]
+        side = opposite(side)
+        epSquare = undo.ep
+        castle = undo.castle
+        halfmove = undo.halfmove
+    }
+
     fun gameResult(playerIsWhite: Boolean): GameResult? {
         if (isCheckmate()) {
             val whiteWon = side == BLACK

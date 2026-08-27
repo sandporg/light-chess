@@ -155,18 +155,27 @@ enum class GameResult {
 
 enum class BotLevel {
     EASY,
+    NOVICE,
     MEDIUM,
+    INTERMEDIATE,
     HARD,
+    EXPERT,
     GRAND_MASTER,
     ;
 
     val label: String
         get() = when (this) {
             EASY -> "Easy"
+            NOVICE -> "Novice"
             MEDIUM -> "Medium"
+            INTERMEDIATE -> "Intermediate"
             HARD -> "Hard"
+            EXPERT -> "Expert"
             GRAND_MASTER -> "Grand master"
         }
+
+    val ponders: Boolean
+        get() = this == EXPERT || this == GRAND_MASTER
 }
 
 enum class GameTimer(val durationMs: Long?) {
