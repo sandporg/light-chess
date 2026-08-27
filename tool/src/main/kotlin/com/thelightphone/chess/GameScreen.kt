@@ -127,7 +127,7 @@ class GameScreen(
                         onCancel = viewModel::cancelPromotion,
                     )
                     GameOverlay.ResignConfirm -> ResignOverlay(
-                        onConfirm = viewModel::confirmResign,
+                        onConfirm = { viewModel.confirmResign { goBack() } },
                         onCancel = viewModel::cancelResign,
                     )
                     is GameOverlay.GameOver -> LightFullscreenModal(

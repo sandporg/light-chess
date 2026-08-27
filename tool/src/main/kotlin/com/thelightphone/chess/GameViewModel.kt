@@ -347,11 +347,14 @@ class GameViewModel(
         _ui.update { it.copy(overlay = GameOverlay.ResignConfirm) }
     }
 
-    fun confirmResign() {
+    fun confirmResign(onDone: () -> Unit) {
         result = GameResult.LOSS
+        clockJob?.cancel()
+        cancelSearch.set(true)
+        discardIdleWork()
         viewModelScope.launch {
             store.remove(gameId)
-            publish(overlay = GameOverlay.GameOver("Resigned"))
+            onDone()
         }
     }
 
