@@ -464,11 +464,11 @@ class GameViewModel(
     }
 
     private fun resultMessage(outcome: GameResult): String = when (outcome) {
-        GameResult.WIN -> "Checkmate — you win"
-        GameResult.LOSS -> "Checkmate — you lose"
+        GameResult.WIN -> "Checkmate. You win!"
+        GameResult.LOSS -> "Checkmate. You lose."
         GameResult.DRAW -> "Draw"
-        GameResult.FLAG_WIN -> "Out of time — you win"
-        GameResult.FLAG_LOSS -> "Out of time — you lose"
+        GameResult.FLAG_WIN -> "Out of time. You win!"
+        GameResult.FLAG_LOSS -> "Out of time. You lose."
     }
 
     companion object {
